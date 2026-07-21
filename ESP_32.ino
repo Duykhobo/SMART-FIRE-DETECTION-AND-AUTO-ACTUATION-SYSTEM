@@ -9,10 +9,10 @@
 
 // --- Cấu hình Wi-Fi ---
 const char* ssid = "Duykhobo";
-const char* password = "Duyzkskhobo@310";
+const char* password = "Duyzkskhobo@890";
 
 // --- Cấu hình API Backend --- (ĐÃ FIX LỖI CÚ PHÁP)
-String serverName = "http://10.27.163.1:5000/api/sensors"; 
+String serverName = "http://10.132.58.1:5000/api/sensors"; 
 
 // Chân giao tiếp với Arduino Uno
 #define RXp2 16
