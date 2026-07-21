@@ -107,13 +107,16 @@ void loop() {
           http.begin(serverName); 
           http.addHeader("Content-Type", "application/json"); 
           
+          // --- BẢO VỆ MẠCH: Hủy kết nối nếu Node.js không phản hồi sau 3 giây ---
+          http.setTimeout(3000); 
+          
           int httpResponseCode = http.POST(jsonPayload); 
           
           if (httpResponseCode > 0) {
             Serial.print("Node.js HTTP Code: ");
             Serial.println(httpResponseCode); 
           } else {
-            Serial.print("Loi POST Node.js: ");
+            Serial.print("Loi POST Node.js (Hoac Server down): ");
             Serial.println(httpResponseCode);
           }
           http.end(); 
