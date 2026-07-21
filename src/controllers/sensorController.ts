@@ -18,6 +18,12 @@ export const createSensorData = async (req: Request, res: Response): Promise<voi
     await newData.save();
     console.log("📥 Vua nhan va luu data tu ESP32:", req.body);
 
+    // Phát (emit) dữ liệu mới qua Socket.IO tới tất cả Client đang kết nối
+    const io = req.app.get("io");
+    if (io) {
+      io.emit("new_sensor_data", newData);
+    }
+
     res.status(200).json({ message: "Luu du lieu thanh cong!" });
   } catch (error) {
     console.error("❌ Loi luu du lieu:", error);

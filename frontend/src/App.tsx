@@ -2,6 +2,7 @@ import axios from "axios";
 import { Activity, AlertTriangle, Droplets, Flame, ShieldCheck, Wind } from "lucide-react";
 import { useEffect, useState } from "react";
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { io } from "socket.io-client";
 
 interface SensorData {
   _id: string;
@@ -36,9 +37,38 @@ export default function App() {
   };
 
   useEffect(() => {
+    // 1. Kéo dữ liệu lịch sử lúc mới load
     fetchData();
-    const interval = setInterval(fetchData, 5000);
-    return () => clearInterval(interval);
+
+    // 2. Kết nối Socket.IO tới Server
+    const socket = io("http://localhost:5000");
+
+    socket.on("new_sensor_data", (newData: SensorData) => {
+      const formattedData = {
+        ...newData,
+        time: new Date(newData.timestamp).toLocaleTimeString("vi-VN", {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        }),
+      };
+
+      // Cập nhật mảng data và cắt bỏ nếu vượt quá 20
+      setData((prevData) => {
+        const updatedData = [...prevData, formattedData];
+        if (updatedData.length > 20) {
+          updatedData.shift();
+        }
+        return updatedData;
+      });
+      
+      setLatest(formattedData);
+    });
+
+    // Ngắt kết nối khi component unmount
+    return () => {
+      socket.disconnect();
+    };
   }, []);
 
   // Đóng gói logic UI của trạng thái để tái sử dụng
