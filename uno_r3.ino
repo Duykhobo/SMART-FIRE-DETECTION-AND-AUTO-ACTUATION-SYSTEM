@@ -3,143 +3,122 @@
 #include <DHT.h>
 #include <SoftwareSerial.h>
 
-// --- Cấu hình chân ---
 #define MQ_SENSOR_PIN A0
 #define DHTPIN A1
 #define FLAME_SENSOR_PIN 8
 #define BUZZER_PIN 7
 #define RELAY1_PIN 6
 #define RELAY2_PIN 5
-
-// Khai báo 3 chân cho LED RGB
 #define RGB_RED_PIN 11
 #define RGB_GREEN_PIN 10
 #define RGB_BLUE_PIN 9
-
 #define DHTTYPE DHT22
+
 #define GAS_THRESHOLD_ON 300
-#define GAS_THRESHOLD_OFF 260 // Ngưỡng Hysteresis: Dưới mới tắt quạt
+#define GAS_THRESHOLD_OFF 260 
 #define TEMP_THRESHOLD 40 
 
-// Cấu hình chân UART phụ để gửi sang ESP
 SoftwareSerial espSerial(2, 3);
-
 DHT dht(DHTPIN, DHTTYPE);
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
-// --- CÁC BIẾN QUẢN LÝ THỜI GIAN VÀ TRẠNG THÁI ---
-unsigned long previousMillis = 0;
-const long updateInterval = 2000; // Cập nhật LCD và gửi ESP mỗi 2 giây
-bool isGasLeaking = false;        // Biến lưu trạng thái Gas để chống nhiễu
-int lastSystemStatus = -1;        // Biến kiểm tra thay đổi trạng thái
+unsigned long previousMillisESP = 0;
+const long intervalESP = 500; // Gửi lên mạng mỗi 500ms
+
+unsigned long previousMillisDHT = 0;
+const long intervalDHT = 2000; // DHT22 cần 2s để đọc 1 lần
+
+bool isGasLeaking = false;
+float t = 0.0;
+float h = 0.0;
 
 void setup() {
   Serial.begin(9600);
   espSerial.begin(9600);
 
-  pinMode(MQ_SENSOR_PIN, INPUT);
-  pinMode(FLAME_SENSOR_PIN, INPUT);
-  pinMode(BUZZER_PIN, OUTPUT);
-  pinMode(RELAY1_PIN, OUTPUT);
-  pinMode(RELAY2_PIN, OUTPUT);
-
-  pinMode(RGB_RED_PIN, OUTPUT);
-  pinMode(RGB_GREEN_PIN, OUTPUT);
-  pinMode(RGB_BLUE_PIN, OUTPUT);
+  pinMode(MQ_SENSOR_PIN, INPUT); pinMode(FLAME_SENSOR_PIN, INPUT);
+  pinMode(BUZZER_PIN, OUTPUT); pinMode(RELAY1_PIN, OUTPUT); pinMode(RELAY2_PIN, OUTPUT);
+  pinMode(RGB_RED_PIN, OUTPUT); pinMode(RGB_GREEN_PIN, OUTPUT); pinMode(RGB_BLUE_PIN, OUTPUT);
 
   noTone(BUZZER_PIN); 
-  digitalWrite(RELAY1_PIN, LOW);
-  digitalWrite(RELAY2_PIN, LOW);
-
-  digitalWrite(RGB_RED_PIN, LOW);
-  digitalWrite(RGB_GREEN_PIN, HIGH);
-  digitalWrite(RGB_BLUE_PIN, LOW);
+  digitalWrite(RELAY1_PIN, LOW); digitalWrite(RELAY2_PIN, LOW);
+  digitalWrite(RGB_RED_PIN, LOW); digitalWrite(RGB_GREEN_PIN, HIGH); digitalWrite(RGB_BLUE_PIN, LOW);
 
   dht.begin();
-  lcd.init();
-  lcd.backlight();
-
-  lcd.setCursor(0, 0);
-  lcd.print("He Thong PCCC");
-  lcd.setCursor(0, 1);
-  lcd.print("Ket noi ESP...");
-  delay(2000);
-  lcd.clear();
+  lcd.init(); lcd.backlight();
+  lcd.setCursor(0, 0); lcd.print("He Thong PCCC");
+  delay(2000); lcd.clear();
+  
+  t = dht.readTemperature();
+  h = dht.readHumidity();
 }
 
 void loop() {
-  // 1. ĐỌC CẢM BIẾN TỐC ĐỘ CAO (Không bị chặn bởi delay)
-  int gasValue = analogRead(MQ_SENSOR_PIN);
-  int flameState = digitalRead(FLAME_SENSOR_PIN);
-  
-  // Logic Hysteresis cho Gas: Chống bật tắt rơ-le liên tục
-  if (gasValue >= GAS_THRESHOLD_ON) {
-    isGasLeaking = true;
-  } else if (gasValue <= GAS_THRESHOLD_OFF) {
-    isGasLeaking = false;
-  }
-
-  // Lấy thời gian hiện tại
   unsigned long currentMillis = millis();
 
-  // 2. CHỈ CẬP NHẬT DỮ LIỆU & GỬI ESP MỖI 2 GIÂY (Tránh nháy màn hình)
-  if (currentMillis - previousMillis >= updateInterval) {
-    previousMillis = currentMillis;
+  // Bắt đầu bấm giờ đo tốc độ chip
+  unsigned long startProcess = millis();
 
-    float h = dht.readHumidity();
-    float t = dht.readTemperature();
-    int systemStatus = 0;
+  // 1. ĐỌC CẢM BIẾN TỐC ĐỘ CAO
+  int gasValue = analogRead(MQ_SENSOR_PIN);
+  int flameState = digitalRead(FLAME_SENSOR_PIN);
 
-    Serial.print("Trang thai lua: ");
-    Serial.println(flameState);
+  if (currentMillis - previousMillisDHT >= intervalDHT) {
+    previousMillisDHT = currentMillis;
+    float newT = dht.readTemperature();
+    float newH = dht.readHumidity();
+    if (!isnan(newT)) { t = newT; h = newH; }
+  }
 
-    // --- HIỂN THỊ DÒNG 1 ---
+  // Logic Hysteresis
+  if (gasValue >= GAS_THRESHOLD_ON) isGasLeaking = true;
+  else if (gasValue <= GAS_THRESHOLD_OFF) isGasLeaking = false;
+
+  int systemStatus = 0;
+
+  // 2. KÍCH HOẠT RƠ-LE NGAY LẬP TỨC (Không bị chặn thời gian)
+  if (flameState == LOW || t >= TEMP_THRESHOLD) {
+    systemStatus = 2;
+    tone(BUZZER_PIN, 2000);
+    digitalWrite(RELAY1_PIN, LOW); digitalWrite(RELAY2_PIN, HIGH);  
+    digitalWrite(RGB_RED_PIN, HIGH); digitalWrite(RGB_GREEN_PIN, LOW); digitalWrite(RGB_BLUE_PIN, LOW);
+  }
+  else if (isGasLeaking) {
+    systemStatus = 1;
+    tone(BUZZER_PIN, 2000);
+    digitalWrite(RELAY1_PIN, HIGH); digitalWrite(RELAY2_PIN, LOW);
+    digitalWrite(RGB_RED_PIN, LOW); digitalWrite(RGB_GREEN_PIN, LOW); digitalWrite(RGB_BLUE_PIN, HIGH);
+  }
+  else {
+    systemStatus = 0;
+    noTone(BUZZER_PIN);
+    digitalWrite(RELAY1_PIN, LOW); digitalWrite(RELAY2_PIN, LOW);
+    digitalWrite(RGB_RED_PIN, LOW); digitalWrite(RGB_GREEN_PIN, HIGH); digitalWrite(RGB_BLUE_PIN, LOW);
+  }
+
+  unsigned long endProcess = millis();
+  unsigned long timeProcess = endProcess - startProcess;
+
+  // 3. GỬI DỮ LIỆU ĐI ĐỊNH KỲ 500ms
+  if (currentMillis - previousMillisESP >= intervalESP) {
+    previousMillisESP = currentMillis;
+
     lcd.setCursor(0, 0);
-    if (isnan(t)) {
-      lcd.print("Loi DHT11!      ");
-    } else {
-      lcd.print("T:"); lcd.print((int)t); lcd.print("C  ");
-      lcd.print("Gas:"); lcd.print(gasValue); lcd.print("   ");
-    }
+    lcd.print("T:"); lcd.print((int)t); lcd.print("C  ");
+    lcd.print("Gas:"); lcd.print(gasValue); lcd.print("   ");
 
-    // --- LOGIC XỬ LÝ SỰ CỐ & HIỂN THỊ DÒNG 2 ---
     lcd.setCursor(0, 1);
+    if (systemStatus == 2) lcd.print(">> CO HOA HOAN<<");
+    else if (systemStatus == 1) lcd.print(">> RO RI GAS! <<");
+    else lcd.print("TT: AN TOAN     ");
 
-    // Kịch bản 1: HỎA HOẠN (Ưu tiên cao nhất)
-    if (flameState == LOW || (!isnan(t) && t >= TEMP_THRESHOLD)) {
-      systemStatus = 2;
-      lcd.print(">> CO HOA HOAN<<");
-      tone(BUZZER_PIN, 2000);
-      digitalWrite(RELAY1_PIN, LOW);   
-      digitalWrite(RELAY2_PIN, HIGH);  
-      digitalWrite(RGB_RED_PIN, HIGH);
-      digitalWrite(RGB_GREEN_PIN, LOW);
-      digitalWrite(RGB_BLUE_PIN, LOW);
-    }
-    // Kịch bản 2: RÒ RỈ GAS (Dùng biến isGasLeaking thay vì đọc trực tiếp)
-    else if (isGasLeaking) {
-      systemStatus = 1;
-      lcd.print(">> RO RI GAS! <<");
-      tone(BUZZER_PIN, 1000);
-      digitalWrite(RELAY1_PIN, HIGH);  
-      digitalWrite(RELAY2_PIN, LOW);
-      digitalWrite(RGB_RED_PIN, LOW);
-      digitalWrite(RGB_GREEN_PIN, LOW);
-      digitalWrite(RGB_BLUE_PIN, HIGH);
-    }
-    // Kịch bản 3: AN TOÀN
-    else {
-      systemStatus = 0;
-      lcd.print("TT: AN TOAN     ");
-      noTone(BUZZER_PIN);
-      digitalWrite(RELAY1_PIN, LOW);
-      digitalWrite(RELAY2_PIN, LOW);
-      digitalWrite(RGB_RED_PIN, LOW);
-      digitalWrite(RGB_GREEN_PIN, HIGH);
-      digitalWrite(RGB_BLUE_PIN, LOW);
+    // Đoạn này in ra log cho tui copy nè
+    if (systemStatus != 0) {
+        Serial.print("Thoi gian xu ly (T_processing): "); 
+        Serial.print(timeProcess); 
+        Serial.println(" ms");
     }
 
-    // --- GỬI DỮ LIỆU SANG ESP32 ---
     String dataPacket = String(t) + "," + String(h) + "," + String(gasValue) + "," + String(flameState) + "," + String(systemStatus);
     espSerial.println(dataPacket);
   }
